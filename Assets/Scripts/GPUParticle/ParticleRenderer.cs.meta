@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 6586826cff736364ea3c4890c2a5e854
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - PerParticleMesh: {instanceID: 0}
+  - material: {instanceID: 0}
+  - GPUParticleCompute: {fileID: 7200000, guid: 5de06f067195f634193dc5b758e9d878, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

@@ -1,0 +1,150 @@
+
+#include "GPUParticleFunction.hlsl"
+
+#ifdef PLATFORM_LANE_COUNT      // We can infer the size of a wave. This is currently not possible on non-consoles, so we have to fallback to a sensible default in those cases.
+#define NR_THREADS              PLATFORM_LANE_COUNT
+#else
+#define NR_THREADS              64                                  // default to 64 threads per group on other platforms..
+#endif
+
+float4 _ParticleEmitterPosition;
+float4 _ParticleEmitterRotator;
+
+int    _ParticleEmitterSharp;
+
+float4 _ParticleBaseParam;         // Count,  passTime, pitchX, pitchY
+
+float4 _ParticleEmitterParam;      // radius, radiusThickness, angleDegree, arcDegree
+
+float4 _ParticleLifeParam;         // minLife, maxLife, deltaTime,
+
+float4 _ParticleVelocityParam;     // MinSpeed, MaxSpeed, SpinSpeed, SpinSpeedFromMoving
+
+float4 _ParticleAccelerationParam; // Acceleration(xyz), SpinRandomness
+
+Texture2D<float4>   _InPositionTexture; // position(xyz), curLife( 0 : the end of life)
+Texture2D<float4>   _InVelocityTexture; // velocity(xyz), totalLife
+Texture2D<float4>   _InSpinTexture;
+
+RWTexture2D<float4> _OutPositionTexture;
+RWTexture2D<float4> _OutVelocityTexture;
+RWTexture2D<float4> _OutSpinTexture;
+
+#pragma kernel InitParticle
+
+[numthreads(NR_THREADS, 1, 1)]
+void InitParticle(uint3 id : SV_DispatchThreadID)
+{
+    //float randomSeed = _ParticleBaseParam.y * 100;
+    uint2 texAddress = IDToInt2(id.x, _ParticleBaseParam.z);
+    float2 uv = texAddress / _ParticleBaseParam.zw;
+
+    //float4 positionLife;
+    //float4 velocity;
+    //float4 spin;
+
+    //EmitterParticle( _ParticleEmitterSharp, _ParticleLifeParam.xy, uv, randomSeed,
+    //                    _ParticleEmitterParam, _ParticleVelocityParam.xy, _ParticleVelocityParam.zw,
+    //                   positionLife, velocity);
+
+    //velocity.xyz = QuaternionMulVector(_ParticleEmitterRotator, velocity.xyz);
+
+    //positionLife.xyz = QuaternionMulVector(_ParticleEmitterRotator, positionLife.xyz);
+    //positionLife.xyz = positionLife.xyz + _ParticleEmitterPosition.xyz;
+
+    //spin = InitParticleRotation(uv);
+
+    //float deltaTime = _ParticleLifeParam.z;
+    //positionLife.w      = UpdateLife(positionLife.w, deltaTime);
+
+    _OutPositionTexture[texAddress] = 0;//positionLife;
+    _OutVelocityTexture[texAddress] = 0;//velocity;
+    _OutSpinTexture[texAddress] = 0;//spin;
+}
+
+#pragma kernel UpdateBillboardParticle
+
+[numthreads(NR_THREADS, 1, 1)]
+void UpdateBillboardParticle(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x > (uint) _ParticleBaseParam.x)
+        return;
+
+    float deltaTime = _ParticleLifeParam.z;
+    //float randomSeed = _ParticleBaseParam.y * 100;
+    float randomSeed = _ParticleBaseParam.y;
+    uint2 texAddress = IDToInt2(id.x, _ParticleBaseParam.z);
+    float2 uv = ((float2)texAddress) / _ParticleBaseParam.zw;
+
+    float4 positionLife = _InPositionTexture[texAddress];
+    float4 velocity = _InVelocityTexture[texAddress];
+
+    positionLife.w = UpdateLife(positionLife.w, deltaTime);
+
+    float3 position = positionLife.xyz;
+
+    if (positionLife.w > 0.5)
+    {
+        UpdatePosition(deltaTime, position, velocity, _ParticleAccelerationParam.xyz);
+        positionLife.xyz = position;
+    }
+    else if (positionLife.w <= 0 || positionLife.w > _ParticleLifeParam.y)
+    {
+        EmitterParticle(_ParticleEmitterSharp, _ParticleLifeParam.xy, uv, randomSeed,
+            _ParticleEmitterParam, _ParticleVelocityParam.xy, _ParticleVelocityParam.zw,
+            positionLife, velocity);
+
+        velocity.xyz = QuaternionMulVector(_ParticleEmitterRotator, velocity.xyz);
+
+        positionLife.xyz = QuaternionMulVector(_ParticleEmitterRotator, positionLife.xyz);
+        positionLife.xyz = positionLife.xyz + _ParticleEmitterPosition.xyz;
+    }
+
+    _OutPositionTexture[texAddress] = positionLife;
+    _OutVelocityTexture[texAddress] = velocity;
+}
+
+#pragma kernel UpdateParticle
+
+[numthreads(NR_THREADS, 1, 1)]
+void UpdateParticle(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x > (uint) _ParticleBaseParam.x)
+        return;
+
+    float deltaTime = _ParticleLifeParam.z;
+    float randomSeed = _ParticleBaseParam.y;
+    uint2 texAddress = IDToInt2(id.x, _ParticleBaseParam.z);
+    float2 uv = ((float2)texAddress) / _ParticleBaseParam.zw;
+
+    float4 positionLife = _InPositionTexture[texAddress];
+    float4 velocity = _InVelocityTexture[texAddress];
+    float4 spin = _InSpinTexture[texAddress];
+
+    positionLife.w = UpdateLife(positionLife.w, deltaTime);
+
+    positionLife.w = clamp(positionLife.w, 0, _ParticleLifeParam.y);
+
+    if (positionLife.w > 0.5)
+    {
+        UpdatePosition(deltaTime, positionLife.xyz, velocity, _ParticleAccelerationParam.xyz);
+        UpdateSpin(deltaTime, spin, uv, _ParticleVelocityParam.z, _ParticleVelocityParam.w, velocity, _ParticleAccelerationParam.w);
+    }
+    else if (positionLife.w <= 0 || positionLife.w > _ParticleLifeParam.y)
+    {
+        EmitterParticle(_ParticleEmitterSharp, _ParticleLifeParam.xy, uv, randomSeed,
+            _ParticleEmitterParam, _ParticleVelocityParam.xy, _ParticleVelocityParam.zw,
+            positionLife, velocity);
+
+        velocity.xyz = QuaternionMulVector(_ParticleEmitterRotator, velocity.xyz);
+
+        positionLife.xyz = QuaternionMulVector(_ParticleEmitterRotator, positionLife.xyz);
+        positionLife.xyz = positionLife.xyz + _ParticleEmitterPosition.xyz;
+
+        spin = InitParticleRotation(uv);
+    }
+
+    _OutPositionTexture[texAddress] = positionLife;
+    _OutVelocityTexture[texAddress] = velocity;
+    _OutSpinTexture[texAddress] = spin;
+}
