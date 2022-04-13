@@ -1,0 +1,11 @@
+obj
+Logs
+.idea
+*.user
+Library/
+Temp/
+.vs/
+*.csproj
+*.sln
+Builds
+*.apk
